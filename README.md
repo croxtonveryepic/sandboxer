@@ -1,6 +1,6 @@
 # Boxer
 
-Isolated Docker containers for running Claude Code CLI with `--dangerously-skip-permissions` in a network-restricted sandbox.
+Quickly spin up isolated Docker containers for running Claude Code CLI with `--dangerously-skip-permissions`.
 
 ## Prerequisites
 
