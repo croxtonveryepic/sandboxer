@@ -18,35 +18,38 @@ This installs the `boxer` command to your PowerShell profile and `~/bin`. Restar
 ## Quick Start
 
 ```powershell
-# Build the sandbox image (auto-builds on first use)
-boxer build
-
-# Create a sandbox from a Git repo
-boxer create ~\my-project my-sandbox
-
-# Start an interactive Claude session
-boxer start my-sandbox
-
-# Open a debug shell in the container
-boxer shell my-sandbox
-
-# Stop when done
-boxer stop my-sandbox
+boxer create /repo/path project-name
+boxer start project-name                             #      it's that easy!
+/workspace$ claude --dangerously-skip-permissions    # <--- this is safe!
 ```
+
+Sandboxer ships with `claude-switch.py`, which can optionally be used as a credential manager. To use it in a box, run `boxer credential install project-name` and (it will be aliased as `cs`). Then on your host machine:
+
+```powershell
+cs save profile-name
+boxer credential sync
+```
+
+This will save the OAuth token, email, and org name from your currently-signed-in Claude Code session as a `cs` profile, then copy your `cs` profiles into your running containers. Then to copy the profiles to the place where Claude Code looks for them, run in your box:
+
+```bash
+cs use profile-name
+```
+
+...and now you don't have to deal with the login flow in a container with no browser. As the name implies, `claude-switch.py` lets you save multiple profiles, if you have Anthropic accounts for both work and personal use.
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `boxer create <repo> <name>` | Create a new sandbox container |
-| `boxer start <name>` | Start a Claude Code session |
-| `boxer stop <name>` | Stop a container (`--all` for all) |
-| `boxer rm <name>` | Remove a container (`--volumes` to delete data) |
-| `boxer shell <name>` | Open a bash shell in a container |
-| `boxer list` | List all boxer containers |
-| `boxer status <name>` | Show container details and resource usage |
-| `boxer logs <name>` | Show container logs (`--follow`, `--tail`) |
-| `boxer build` | Build/rebuild the sandbox Docker image |
+| Command                      | Description                                                            |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `boxer create <repo> <name>` | Create a new sandbox container                                         |
+| `boxer start <name>`         | Start a Claude Code session                                            |
+| `boxer stop <name>`          | Stop a container (`--all` for all)                                     |
+| `boxer rm <name>`            | Remove a container (`--volumes` to delete data)                        |
+| `boxer list`                 | List all boxer containers                                              |
+| `boxer status <name>`        | Show container details and resource usage                              |
+| `boxer logs <name>`          | Show container logs (`--follow`, `--tail`)                             |
+| `boxer build`                | Build/rebuild the sandbox Docker image (auto-builds on first `create`) |
 
 ### Create Options
 
