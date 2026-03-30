@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Prevent Git Bash path mangling for Docker commands
+export MSYS_NO_PATHCONV=1
+
+# Resolve script directory (follows symlinks)
+_source="${BASH_SOURCE[0]}"
+while [[ -L "$_source" ]]; do
+    _dir="$(cd -P "$(dirname "$_source")" && pwd)"
+    _source="$(readlink "$_source")"
+    [[ "$_source" != /* ]] && _source="$_dir/$_source"
+done
+BOXER_ROOT="$(cd -P "$(dirname "$_source")" && pwd)"
+export BOXER_ROOT
+
+# Source libraries
+source "$BOXER_ROOT/lib/constants.sh"
+source "$BOXER_ROOT/lib/utils.sh"
+source "$BOXER_ROOT/lib/config.sh"
+source "$BOXER_ROOT/lib/docker.sh"
+
+usage() {
+    cat <<'USAGE'
+boxer - Isolated Docker containers for Claude Code CLI
+
+Usage:
+    boxer <command> [options]
+
+Commands:
+    create <repo-path> <name>   Create a new sandbox container
+    start <name>                Start a container and open a shell
+    claude <name>               Launch Claude Code in a container
+    stop <name>                 Stop a container
+    rm <name>                   Remove a container
+    list                        List all boxer containers
+    status <name>               Show container details
+    logs <name>                 Show container logs
+    build                       Build/rebuild the boxer image
+    open <name>                 Open the firewall (allow all outbound)
+    close <name>                Restore the restricted firewall
+    credential sync             Sync credentials to all running containers
+    credential install <name>   Install Claude Switcher on a container
+
+Options:
+    -h, --help                  Show this help
+    -v, --version               Show version
+
+Examples:
+    boxer create ~/my-project my-sandbox
+    boxer start my-sandbox          # shell
+    boxer claude my-sandbox         # Claude Code
+    boxer stop my-sandbox
+    boxer rm my-sandbox --volumes
+
+USAGE
+}
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+    create)     source "$BOXER_ROOT/commands/create.sh";  cmd_create "$@" ;;
+    start|shell|sh) source "$BOXER_ROOT/commands/start.sh";   cmd_start "$@" ;;
+    claude)     source "$BOXER_ROOT/commands/claude.sh";  cmd_claude "$@" ;;
+    stop)       source "$BOXER_ROOT/commands/stop.sh";    cmd_stop "$@" ;;
+    rm|remove)  source "$BOXER_ROOT/commands/rm.sh";      cmd_rm "$@" ;;
+    list|ls)    source "$BOXER_ROOT/commands/list.sh";    cmd_list "$@" ;;
+    status)     source "$BOXER_ROOT/commands/status.sh";  cmd_status "$@" ;;
+    logs)       source "$BOXER_ROOT/commands/logs.sh";    cmd_logs "$@" ;;
+    build)      source "$BOXER_ROOT/commands/build.sh";   cmd_build "$@" ;;
+    open)       source "$BOXER_ROOT/commands/open.sh";    cmd_open "$@" ;;
+    close)      source "$BOXER_ROOT/commands/close.sh";   cmd_close "$@" ;;
+    credential|cred)
+        source "$BOXER_ROOT/commands/start.sh"
+        source "$BOXER_ROOT/commands/credential.sh"
+        cmd_credential "$@"
+        ;;
+    -h|--help|help) usage ;;
+    -v|--version)   echo "boxer $BOXER_VERSION" ;;
+    "")         usage; exit 1 ;;
+    *)          die "Unknown command: $command. Run 'boxer --help' for usage." ;;
+esac
