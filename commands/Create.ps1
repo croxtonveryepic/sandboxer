@@ -109,8 +109,9 @@ Options:
     $sshDir = Join-Path $HOME ".ssh"
     if ($mountSsh -eq "true") {
         if (Test-Path $sshDir) {
+            $sshDirDocker = ConvertTo-DockerPath $sshDir
             $cmd += "-v"
-            $cmd += "${sshDir}:/root/.ssh-staging:ro"
+            $cmd += "${sshDirDocker}:/root/.ssh-staging:ro"
         }
         else {
             Write-BoxerWarn "~/.ssh not found, skipping SSH mount"
@@ -121,8 +122,9 @@ Options:
     $gitconfigFile = Join-Path $HOME ".gitconfig"
     if ($mountGitconfig -eq "true") {
         if (Test-Path $gitconfigFile) {
+            $gitconfigFileDocker = ConvertTo-DockerPath $gitconfigFile
             $cmd += "-v"
-            $cmd += "${gitconfigFile}:$($script:BOXER_CONTAINER_HOME)/.gitconfig:ro"
+            $cmd += "${gitconfigFileDocker}:$($script:BOXER_CONTAINER_HOME)/.gitconfig:ro"
         }
         else {
             Write-BoxerWarn "~/.gitconfig not found, skipping git config mount"

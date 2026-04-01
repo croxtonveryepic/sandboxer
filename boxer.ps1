@@ -109,10 +109,10 @@ function Invoke-BoxerDispatch {
             '^--print$'           { $params["Print"] = $true }
             '^--prompt$'          { $i++; $params["Prompt"] = $RawArgs[$i] }
             '^--model$'           { $i++; $params["Model"] = $RawArgs[$i] }
-            '^(--follow|-F)$'     { $params["Follow"] = $true }
+            '^(--follow|-[fF])$'  { $params["Follow"] = $true }
             '^(--tail|-n)$'       { $i++; $params["Tail"] = $RawArgs[$i] }
             '^(--volumes|-V)$'    { $params["Volumes"] = $true }
-            '^(--force|-f)$'      { $params["Force"] = $true }
+            '^--force$'           { $params["Force"] = $true }
             '^(--all|-a)$'        { $params["All"] = $true }
             default               { [void]$positional.Add($arg) }
         }

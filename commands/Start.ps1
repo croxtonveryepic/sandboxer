@@ -29,7 +29,7 @@ To launch Claude Code directly, use: boxer claude <name>
     $workspace = Get-ContainerLabel -Name $Name -Label "boxer.workspace"
 
     Write-BoxerInfo "Opening shell in '$Name'..."
-    docker exec -it -w $workspace --user $script:BOXER_CONTAINER_USER $Name bash
+    docker exec -it -w "$workspace" --user $script:BOXER_CONTAINER_USER $Name bash
 
     Write-BoxerInfo "Shell exited. Container '$Name' is still running."
     Write-BoxerInfo "  Re-enter:  boxer start $Name"
@@ -171,8 +171,8 @@ function Sync-BoxerClaudeConfig {
         }
     }
 
-    # Directories to sync (entire trees)
-    $dirs = @("rules", "agents", "commands", "skills", "hooks", "ecc", "plugins", "profiles")
+    # Non-sensitive directories to sync (entire trees via docker cp)
+    $dirs = @("rules", "agents", "commands", "skills", "hooks", "ecc", "plugins")
     foreach ($d in $dirs) {
         $dirPath = Join-Path $srcDir $d
         if (Test-Path $dirPath) {
@@ -182,14 +182,23 @@ function Sync-BoxerClaudeConfig {
         }
     }
 
+    # Profiles contain OAuth refresh tokens — write each file with restricted
+    # umask to avoid a TOCTOU window where tokens are briefly world-readable.
+    $profilesDir = Join-Path $srcDir "profiles"
+    if (Test-Path $profilesDir) {
+        docker exec --user $script:BOXER_CONTAINER_USER $Name mkdir -p "$destDir/profiles" 2>&1 | Out-Null
+        $profileFiles = Get-ChildItem -Path $profilesDir -Filter "*.json" -ErrorAction SilentlyContinue
+        foreach ($pf in $profileFiles) {
+            $containerPath = "$destDir/profiles/$($pf.Name)"
+            Get-Content -Raw $pf.FullName | docker exec -i --user $script:BOXER_CONTAINER_USER $Name bash -c 'umask 077 && cat > "$1"' _ $containerPath
+        }
+    }
+
     # Remove host's .active marker — each container tracks its own active profile
     docker exec $Name rm -f "$destDir/profiles/.active" 2>&1 | Out-Null
 
-    # Fix ownership for everything we just copied
+    # Fix ownership for non-sensitive directories we copied via docker cp
     docker exec $Name chown -R "$($script:BOXER_CONTAINER_USER):$($script:BOXER_CONTAINER_USER)" $destDir 2>&1 | Out-Null
-
-    # Restrict profile file permissions (contain OAuth refresh tokens)
-    docker exec $Name find "$destDir/profiles" -name '*.json' -exec chmod 600 {} + 2>&1 | Out-Null
 }
 
 # Sync ~/.claude.json from the host into the container.
@@ -207,9 +216,8 @@ function Sync-BoxerClaudeJson {
 
     $dest = "$($script:BOXER_CONTAINER_HOME)/.claude.json"
 
-    docker cp $src "${Name}:${dest}"
-    docker exec $Name chown "$($script:BOXER_CONTAINER_USER):$($script:BOXER_CONTAINER_USER)" $dest 2>&1 | Out-Null
-    docker exec $Name chmod 600 $dest 2>&1 | Out-Null
+    # Write with restricted umask to avoid TOCTOU window where file is briefly world-readable
+    Get-Content -Raw $src | docker exec -i --user $script:BOXER_CONTAINER_USER $Name bash -c 'umask 077 && cat > "$1"' _ $dest
 }
 
 # Auto-apply the host's active profile when a container has no credentials yet.
@@ -236,6 +244,12 @@ function Apply-InitialProfile {
 
     if ([string]::IsNullOrWhiteSpace($activeProfile)) { return }
 
+    # Validate profile name to prevent injection
+    if ($activeProfile -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]*$') {
+        Write-BoxerWarn "Invalid profile name '$activeProfile', skipping"
+        return
+    }
+
     Write-BoxerInfo "Applying profile '$activeProfile' to new container..."
-    docker exec --user $script:BOXER_CONTAINER_USER $Name bash -c "command -v cs >/dev/null 2>&1 && cs use $activeProfile" 2>&1 | Out-Null
+    docker exec --user $script:BOXER_CONTAINER_USER $Name bash -c 'command -v cs >/dev/null 2>&1 && cs use -- "$1"' _ $activeProfile 2>&1 | Out-Null
 }

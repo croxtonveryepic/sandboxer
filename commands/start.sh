@@ -172,18 +172,26 @@ _sync_claude_config() {
         if [[ -d "$src_dir/$d" ]]; then
             # Remove stale copy, then copy fresh
             docker exec "$name" rm -rf "$dest_dir/$d" 2>/dev/null || true
-            MSYS_NO_PATHCONV=1 docker cp "$src_dir/$d" "${name}:${dest_dir}/$d"
+
+            if [[ "$d" == "profiles" ]]; then
+                # Profiles contain OAuth tokens — write as agent user with
+                # restrictive umask so files are never world-readable (no TOCTOU gap)
+                docker exec "$name" mkdir -p "$dest_dir/$d" 2>/dev/null || true
+                docker exec "$name" chown "${BOXER_CONTAINER_USER}:${BOXER_CONTAINER_USER}" "$dest_dir/$d" 2>/dev/null || true
+                tar -cf - -C "$src_dir/$d" . | \
+                    docker exec -i --user "$BOXER_CONTAINER_USER" "$name" \
+                        bash -c 'umask 077 && tar -xf - -C "$1"' _ "$dest_dir/$d"
+            else
+                MSYS_NO_PATHCONV=1 docker cp "$src_dir/$d" "${name}:${dest_dir}/$d"
+            fi
         fi
     done
 
     # Remove host's .active marker — each container tracks its own active profile
     docker exec "$name" rm -f "$dest_dir/profiles/.active" 2>/dev/null || true
 
-    # Fix ownership for everything we just copied
+    # Fix ownership for everything we just copied (non-profile dirs copied as root)
     docker exec "$name" chown -R "${BOXER_CONTAINER_USER}:${BOXER_CONTAINER_USER}" "$dest_dir" 2>/dev/null || true
-
-    # Restrict profile file permissions (contain OAuth refresh tokens)
-    docker exec "$name" find "$dest_dir/profiles" -name '*.json' -exec chmod 600 {} + 2>/dev/null || true
 }
 
 # Sync ~/.claude.json from the host into the container.
@@ -202,9 +210,9 @@ _sync_claude_json() {
         return
     fi
 
-    MSYS_NO_PATHCONV=1 docker cp "$src" "${name}:${dest}"
-    docker exec "$name" chown "${BOXER_CONTAINER_USER}:${BOXER_CONTAINER_USER}" "$dest" 2>/dev/null || true
-    docker exec "$name" chmod 600 "$dest" 2>/dev/null || true
+    # Write as agent user with restrictive umask so the file is never world-readable
+    docker exec -i --user "$BOXER_CONTAINER_USER" "$name" \
+        bash -c 'umask 077 && cat > "$1"' _ "$dest" < "$src"
 }
 
 # Auto-apply the host's active profile when a container has no credentials yet.
@@ -238,7 +246,13 @@ print(d.get('profile', ''))
         return
     fi
 
+    # Validate profile name to prevent command injection
+    if [[ ! "$active_profile" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        log_warn "Invalid profile name '$active_profile', skipping"
+        return 0
+    fi
+
     log_info "Applying profile '$active_profile' to new container..."
     docker exec --user "$BOXER_CONTAINER_USER" "$name" \
-        bash -c "command -v cs >/dev/null 2>&1 && cs use $active_profile" || true
+        bash -c 'command -v cs >/dev/null 2>&1 && cs use -- "$1"' _ "$active_profile" || true
 }

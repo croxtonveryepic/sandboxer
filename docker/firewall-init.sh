@@ -9,11 +9,20 @@ iptables -F OUTPUT 2>/dev/null || true
 # Default policy: drop all outbound
 iptables -P OUTPUT DROP
 
+# INPUT and FORWARD: drop all by default
+iptables -P INPUT DROP
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -P FORWARD DROP
+
 # Allow loopback
 iptables -A OUTPUT -o lo -j ACCEPT
 
 # Allow established/related connections (responses to allowed requests)
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Block ICMP to prevent tunneling
+iptables -A OUTPUT -p icmp -j DROP
 
 # Allow DNS only to configured resolvers (blocks DNS tunneling)
 while IFS= read -r ns; do
@@ -61,6 +70,15 @@ if [[ -n "${BOXER_EXTRA_DOMAINS:-}" ]]; then
         resolve_and_allow "$_domain"
         echo "[boxer] Allowed extra domain: $_domain"
     done
+fi
+
+# --- IPv6: block all outbound by default ---
+if command -v ip6tables &>/dev/null; then
+    ip6tables -F OUTPUT 2>/dev/null || true
+    ip6tables -P OUTPUT DROP 2>/dev/null || true
+    ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+    ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    echo "[firewall] IPv6 OUTPUT policy set to DROP"
 fi
 
 echo "[boxer] Firewall configured: outbound restricted to allowlisted domains"

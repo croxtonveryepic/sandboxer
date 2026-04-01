@@ -26,7 +26,7 @@ fi
 mkdir -p "$TARGET"
 
 # Copy all files from staging into the real .ssh directory
-cp -a "$STAGING"/. "$TARGET"/
+cp -rL "$STAGING"/. "$TARGET"/
 
 # Fix ownership
 chown -R agent:agent "$TARGET"

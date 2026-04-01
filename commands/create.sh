@@ -188,7 +188,9 @@ HELP
     cmd+=("$BOXER_IMAGE")
 
     # Execute
-    MSYS_NO_PATHCONV=1 "${cmd[@]}" >/dev/null
+    if ! MSYS_NO_PATHCONV=1 "${cmd[@]}" >/dev/null; then
+        die "Failed to create container '$name'."
+    fi
     log_success "Container '$name' created."
 
     if $start_after; then

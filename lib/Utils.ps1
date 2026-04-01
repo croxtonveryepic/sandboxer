@@ -16,8 +16,8 @@ function Write-BoxerSuccess {
 
 function Write-BoxerWarn {
     param([string]$Message)
-    Write-Host "[boxer] " -ForegroundColor Yellow -NoNewline
-    Write-Host $Message
+    $msg = "[boxer] $Message"
+    [Console]::Error.WriteLine($msg)
 }
 
 function Write-BoxerDebug {
@@ -37,8 +37,8 @@ function Write-BoxerDiag {
 
 function Write-BoxerError {
     param([string]$Message)
-    Write-Host "[boxer] " -ForegroundColor Red -NoNewline
-    Write-Host $Message
+    $msg = "[boxer] $Message"
+    [Console]::Error.WriteLine($msg)
 }
 
 function Stop-BoxerWithError {

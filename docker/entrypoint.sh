@@ -7,7 +7,9 @@ echo "[boxer:entrypoint] Args: $*"
 # Run firewall setup as root (requires NET_ADMIN capability)
 if [[ "$(id -u)" == "0" ]]; then
     echo "[boxer:entrypoint] Running firewall setup as root..."
+    firewall_ok=true
     /usr/local/bin/firewall-init.sh 2>&1 || {
+        firewall_ok=false
         echo "[boxer:entrypoint] Warning: firewall setup failed (exit=$?), may lack NET_ADMIN capability"
     }
 
@@ -18,7 +20,12 @@ if [[ "$(id -u)" == "0" ]]; then
         /usr/local/bin/copy-ssh-keys.sh /root/.ssh-staging 2>&1
     fi
 
-    # Signal readiness regardless of firewall outcome
+    # Signal readiness — warn prominently if firewall failed in restricted mode
+    if [[ "$firewall_ok" == "false" && "${BOXER_NETWORK:-}" == "restricted" ]]; then
+        echo "============================================================"
+        echo "[boxer] WARNING: Firewall initialization FAILED — container network is NOT restricted!"
+        echo "============================================================"
+    fi
     touch /tmp/.boxer-ready
     echo "[boxer:entrypoint] Readiness signal written to /tmp/.boxer-ready"
 

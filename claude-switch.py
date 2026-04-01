@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,11 @@ CREDENTIALS_FILE = CLAUDE_DIR / ".credentials.json"
 PROFILES_DIR = CLAUDE_DIR / "profiles"
 ACTIVE_FILE = PROFILES_DIR / ".active"
 SCHEMA_VERSION = 3
+
+
+def validate_profile_name(name: str) -> bool:
+    """Validate profile name is safe for use as a filename."""
+    return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$', name))
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -51,7 +57,10 @@ def write_json_atomic(path: Path, data: dict) -> None:
             json.dump(data, f, indent=2)
         os.replace(tmp, path)
     except Exception:
-        os.unlink(tmp)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise
 
 
@@ -136,19 +145,31 @@ def migrate_profile(data: dict) -> dict:
         migrated["email"] = migrated["oauth_account"]["emailAddress"]
         migrated["org"] = migrated["oauth_account"]["organizationName"]
 
+    if "oauth_account" not in migrated:
+        migrated["oauth_account"] = {
+            "emailAddress": migrated.get("email", "unknown"),
+            "organizationName": migrated.get("org", "unknown"),
+        }
+    migrated.setdefault("email", "unknown")
+    migrated.setdefault("org", "unknown")
+    migrated.setdefault("subscription_type", "unknown")
+
     migrated["schema_version"] = SCHEMA_VERSION
     return migrated
 
 
 # ── Profile operations ──────────────────────────────────────────────
 
-def load_profile(name: str) -> dict:
+def load_profile(name: str) -> Optional[dict]:
     path = PROFILES_DIR / f"{name}.json"
     if not path.exists():
         print(f"Error: Profile '{name}' not found.")
         print(f"Available profiles: {', '.join(list_profile_names()) or '(none)'}")
         sys.exit(1)
-    data = json.loads(path.read_text("utf-8"))
+    data = read_json_safe(path)
+    if data is None:
+        print(f"Error: Profile '{name}' contains invalid JSON.")
+        return None
     return migrate_profile(data)
 
 
@@ -187,7 +208,7 @@ def check_running_claude() -> bool:
                     return True
         else:
             result = subprocess.run(
-                ["pgrep", "-x", "claude"],
+                ["pgrep", "-ix", "claude"],
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
@@ -211,6 +232,8 @@ def synthesize_active_from_token(*, quiet: bool = False) -> bool:
         return False
     live_hash = hash_token(live_token)
     for pname in list_profile_names():
+        if not validate_profile_name(pname):
+            continue
         p = read_json_safe(PROFILES_DIR / f"{pname}.json")
         if p is None:
             continue
@@ -237,6 +260,10 @@ def freshen_active_profile(*, quiet: bool = False) -> bool:
         return False
 
     profile_name = active["profile"]
+    if not validate_profile_name(profile_name):
+        if not quiet:
+            print(f"Error: Invalid profile name '{profile_name}' in .active file, skipping freshen.")
+        return False
     profile_path = PROFILES_DIR / f"{profile_name}.json"
     if not profile_path.exists():
         if not quiet:
@@ -258,7 +285,11 @@ def freshen_active_profile(*, quiet: bool = False) -> bool:
         return False
 
     # Token has rotated — update the profile
-    profile_data = json.loads(profile_path.read_text("utf-8"))
+    profile_data = read_json_safe(profile_path)
+    if profile_data is None:
+        if not quiet:
+            print(f"Warning: Could not read profile '{profile_name}', skipping freshen.")
+        return False
     updated = migrate_profile(profile_data)
 
     live_creds = read_json_safe(CREDENTIALS_FILE)
@@ -288,11 +319,15 @@ def freshen_active_profile(*, quiet: bool = False) -> bool:
 
 def cmd_save(args: argparse.Namespace) -> None:
     name = args.name
+    if not validate_profile_name(name):
+        print(f"Error: Invalid profile name '{name}'. Use 1-64 alphanumeric, hyphen, or underscore characters.")
+        sys.exit(1)
     profile_path = PROFILES_DIR / f"{name}.json"
 
     if profile_path.exists() and not args.overwrite:
-        existing = json.loads(profile_path.read_text("utf-8"))
-        print(f"Profile '{name}' already exists ({existing.get('email', '?')}).")
+        existing = read_json_safe(profile_path)
+        email = existing.get("email", "?") if existing else "?"
+        print(f"Profile '{name}' already exists ({email}).")
         print("Use --overwrite to replace it.")
         sys.exit(1)
 
@@ -333,6 +368,9 @@ def cmd_save(args: argparse.Namespace) -> None:
 
 def cmd_use(args: argparse.Namespace) -> None:
     name = args.name
+    if not validate_profile_name(name):
+        print(f"Error: Invalid profile name '{name}'. Use 1-64 alphanumeric, hyphen, or underscore characters.")
+        sys.exit(1)
 
     # Check if already on this profile (by name via .active, not token matching)
     active = read_active()
@@ -412,7 +450,11 @@ def cmd_freshen(args: argparse.Namespace) -> None:
     migrated = 0
     for pname in names:
         path = PROFILES_DIR / f"{pname}.json"
-        data = json.loads(path.read_text("utf-8"))
+        data = read_json_safe(path)
+        if data is None:
+            if not args.quiet:
+                print(f"  Warning: Could not read '{pname}', skipping.")
+            continue
         if data.get("schema_version") != SCHEMA_VERSION:
             updated = migrate_profile(data)
             write_json_atomic(path, updated)
@@ -425,10 +467,10 @@ def cmd_freshen(args: argparse.Namespace) -> None:
     # Step 2: Synthesize .active if missing
     if not args.quiet:
         print("Checking .active marker...")
-    if not read_active():
+    active = read_active()
+    if not active:
         synthesize_active_from_token(quiet=args.quiet)
     elif not args.quiet:
-        active = read_active()
         print(f"  .active already set: '{active.get('profile')}'")
 
     # Step 3: Freshen the active profile from live credentials
@@ -455,9 +497,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     if not active_name:
         active_token = get_active_refresh_token()
         if active_token:
+            active_token_hash = hash_token(active_token)
             for pname in profiles:
-                p = json.loads((PROFILES_DIR / f"{pname}.json").read_text("utf-8"))
-                if p.get("claude_ai_oauth", {}).get("refreshToken") == active_token:
+                p = read_json_safe(PROFILES_DIR / f"{pname}.json")
+                if p is None:
+                    continue
+                stored_token = p.get("claude_ai_oauth", {}).get("refreshToken")
+                if stored_token and hash_token(stored_token) == active_token_hash:
                     active_name = pname
                     break
 
@@ -471,7 +517,9 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     print("Profiles:")
     for pname in profiles:
-        p = json.loads((PROFILES_DIR / f"{pname}.json").read_text("utf-8"))
+        p = read_json_safe(PROFILES_DIR / f"{pname}.json")
+        if p is None:
+            continue
         p = migrate_profile(p)
         marker = " *" if pname == active_name else "  "
         stale_tag = " (stale)" if pname == active_name and stale else ""

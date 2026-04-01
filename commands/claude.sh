@@ -66,7 +66,10 @@ HELP
     exec_cmd+=(claude --dangerously-skip-permissions)
     exec_cmd+=("${claude_args[@]}")
 
-    MSYS_NO_PATHCONV=1 "${exec_cmd[@]}" || true
+    set +e
+    MSYS_NO_PATHCONV=1 "${exec_cmd[@]}"
+    local claude_exit=$?
+    set -e
 
     # Post-session: capture any token rotation from the Claude session
     log_info "Capturing credential state..."
@@ -81,4 +84,6 @@ HELP
     log_info "  Re-enter:  boxer claude $name"
     log_info "  Shell:     boxer start $name"
     log_info "  Stop:      boxer stop $name"
+
+    return $claude_exit
 }
