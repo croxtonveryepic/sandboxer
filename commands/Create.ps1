@@ -118,18 +118,9 @@ Options:
         }
     }
 
-    # Git config (read-only)
-    $gitconfigFile = Join-Path $HOME ".gitconfig"
-    if ($mountGitconfig -eq "true") {
-        if (Test-Path $gitconfigFile) {
-            $gitconfigFileDocker = ConvertTo-DockerPath $gitconfigFile
-            $cmd += "-v"
-            $cmd += "${gitconfigFileDocker}:$($script:BOXER_CONTAINER_HOME)/.gitconfig:ro"
-        }
-        else {
-            Write-BoxerWarn "~/.gitconfig not found, skipping git config mount"
-        }
-    }
+    # Git config — no longer bind-mounted (Windows safe.directory entries
+    # produce warnings inside the Linux container). Copied and filtered
+    # during boot sync instead; see Sync-BoxerGitConfig in Start.ps1.
 
     # Environment: override Windows-specific git settings for Linux container
     $cmd += "-e", "GIT_SSH_COMMAND=ssh"

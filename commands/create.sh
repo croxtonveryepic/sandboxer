@@ -140,16 +140,9 @@ HELP
         fi
     fi
 
-    # Git config (read-only)
-    if [[ "$mount_gitconfig" == "true" ]]; then
-        local gitconfig_path
-        gitconfig_path="$(to_docker_path "$HOME/.gitconfig")"
-        if [[ -f "$HOME/.gitconfig" ]]; then
-            cmd+=(-v "$gitconfig_path:${BOXER_CONTAINER_HOME}/.gitconfig:ro")
-        else
-            log_warn "~/.gitconfig not found, skipping git config mount"
-        fi
-    fi
+    # Git config — no longer bind-mounted (Windows safe.directory entries
+    # produce warnings inside the Linux container). Copied and filtered
+    # during boot sync instead; see _sync_gitconfig in start.sh.
 
     # Environment: override Windows-specific git settings for Linux container
     cmd+=(-e "GIT_SSH_COMMAND=ssh")

@@ -112,6 +112,9 @@ function Initialize-BoxerContainer {
     # Freshen host's active profile before syncing (captures token rotation)
     Invoke-BoxerFreshenHostProfile
 
+    # Copy host .gitconfig (filtered for container use)
+    Sync-BoxerGitConfig $Name
+
     # Sync Claude Code config (rules, settings, agents, profiles, etc.)
     Sync-BoxerClaudeConfig $Name
 
@@ -147,6 +150,35 @@ function Invoke-BoxerFreshenHostProfile {
     if (-not $py) { return }
 
     & $py $csScript freshen --quiet 2>&1 | Out-Null
+}
+
+# Copy the host's .gitconfig into the container, stripping safe.directory
+# entries that contain Windows paths (they produce warnings on Linux).
+# The correct workspace safe.directory is added by the entrypoint via --system.
+function Sync-BoxerGitConfig {
+    param([string]$Name)
+
+    $syncEnabled = Get-BoxerConfig -Section "mounts" -Key "gitconfig" -Default "true"
+    if ($syncEnabled -ne "true") { return }
+
+    $src = Join-Path $HOME ".gitconfig"
+    if (-not (Test-Path $src)) { return }
+
+    $dest = "$($script:BOXER_CONTAINER_HOME)/.gitconfig"
+
+    # Copy gitconfig into the container. If the path is a read-only bind mount
+    # (existing container created before this fix), docker cp will fail.
+    $null = docker cp $src "${Name}:${dest}" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-BoxerWarn ".gitconfig is a read-only bind mount (legacy container). Recreate the container to fix git warnings."
+        return
+    }
+
+    # Strip all safe.directory entries — they're host-specific
+    docker exec $Name git config --global --unset-all safe.directory 2>&1 | Out-Null
+
+    # Fix ownership
+    docker exec $Name chown "$($script:BOXER_CONTAINER_USER):$($script:BOXER_CONTAINER_USER)" $dest 2>&1 | Out-Null
 }
 
 function Sync-BoxerClaudeConfig {

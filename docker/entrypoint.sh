@@ -34,6 +34,26 @@ if [[ "$(id -u)" == "0" ]]; then
     # The host .gitconfig is read-only, so we inject into /etc/gitconfig.
     git config --system safe.directory "${BOXER_WORKSPACE:-/workspace}"
 
+    # If .gitconfig is a read-only bind mount (legacy containers), it may
+    # contain Windows-path safe.directory entries that spam warnings on
+    # every git command. Copy to a writable location, strip them, and
+    # redirect git's global config via /etc/profile.d.
+    gitconfig="/home/agent/.gitconfig"
+    if [[ -f "$gitconfig" ]] && ! test -w "$gitconfig" 2>/dev/null; then
+        filtered="/tmp/.gitconfig-filtered"
+        cp "$gitconfig" "$filtered"
+        git config --file "$filtered" --unset-all safe.directory 2>/dev/null || true
+        chown agent:agent "$filtered"
+        echo "export GIT_CONFIG_GLOBAL=$filtered" > /etc/profile.d/boxer-git.sh
+        # Also inject into .bashrc for non-login interactive shells
+        if ! grep -q "boxer-gitconfig-redirect" /home/agent/.bashrc 2>/dev/null; then
+            echo "# boxer-gitconfig-redirect" >> /home/agent/.bashrc
+            echo "export GIT_CONFIG_GLOBAL=$filtered" >> /home/agent/.bashrc
+            chown agent:agent /home/agent/.bashrc
+        fi
+        echo "[boxer:entrypoint] Redirected .gitconfig to filtered copy (stripped Windows safe.directory entries)"
+    fi
+
     # One-time hint about Claude Switcher — append to agent's .bashrc so it
     # surfaces on interactive shell login (not just in docker logs)
     if [[ -f /usr/local/bin/cs ]] && ! grep -q "boxer-cs-hint" /home/agent/.bashrc 2>/dev/null; then
